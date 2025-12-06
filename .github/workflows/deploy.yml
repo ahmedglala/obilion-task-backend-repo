@@ -30,7 +30,7 @@ jobs:
               echo "First time → cloning repo"
               rm -rf $APP_DIR
               git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR
-              cd $APP_DIR
+              cd obilion-task-backend-repo/
             else
               echo "Repo exists → pulling latest"
               git fetch origin
