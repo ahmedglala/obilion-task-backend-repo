@@ -1,9 +1,9 @@
 # .github/workflows/deploy.yml
 name: Deploy Laravel Backend
-
 on:
   push:
-    branches: [ 12.x ]
+    branches: [ 12.x, main ]   # خليناها تشتغل على main و 12.x
+  workflow_dispatch:         # تقدر تشغلها يدوي من GitHub لو عايز
 
 jobs:
   deploy:
@@ -12,48 +12,68 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Laravel via SSH (كل حاجة من الصفر)
+      - name: Deploy Laravel via SSH (Fully Automated)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.BACKEND_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
           script: |
+            set -e  # لو أي أمر فشل الـ workflow يفشل فورًا
+
             APP_DIR=~/laravel-app
 
-            # لو المجلد موجود → نعمل pull، لو مش موجود → نعمل clone من الأول
+            # 1. Clone أو Pull حسب الوضع
             if [ -d "$APP_DIR/.git" ]; then
-              echo "Repository already exists → doing git pull"
+              echo "Repository exists → git pull"
               cd $APP_DIR
-              git checkout main
-              git pull origin main
+              git checkout main || git checkout 12.x || true
+              git pull origin main || git pull origin 12.x || true
             else
-              echo "First time → cloning repository"
+              echo "First time deployment → cloning repo"
               rm -rf $APP_DIR
               git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR
               cd $APP_DIR
             fi
 
-            # تثبيت الـ dependencies
+            # 2. تثبيت PHP extensions اللي Laravel محتاجها (الحل لـ "could not find driver")
+            sudo apt update -y
+            sudo apt install -y php8.3-sqlite3 php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip
+
+            # 3. Composer install
             composer install --no-dev --optimize-autoloader --no-interaction
 
-            # إنشاء .env لو مش موجود
+            # 4. إنشاء أو تعديل .env
             if [ ! -f .env ]; then
               cp .env.example .env
               php artisan key:generate --force
             fi
 
-            sed -i "s/DB_HOST=.*/DB_HOST=${{ secrets.RDS_ENDPOINT }}/g" .env
-            sed -i "s/DB_DATABASE=.*/DB_DATABASE=appdb/g" .env
-            sed -i "s/DB_USERNAME=.*/DB_USERNAME=admin/g" .env
-            sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=${{ secrets.DB_PASSWORD }}/g" .env
+            # تعديل إعدادات الداتابيس تلقائيًا
+            sed -i "s|DB_HOST=.*|DB_HOST=${{ secrets.RDS_ENDPOINT }}|g" .env
+            sed -i "s|DB_DATABASE=.*|DB_DATABASE=appdb|g" .env
+            sed -i "s|DB_USERNAME=.*|DB_USERNAME=admin|g" .env
+            sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|g" .env
 
-            # ميجريشن
+            # نضمن إن الـ session driver يكون database وليس sqlite
+            sed -i "s|SESSION_DRIVER=.*|SESSION_DRIVER=database|g" .env || echo "SESSION_DRIVER=database" >> .env
+            sed -i "s|DB_CONNECTION=.*|DB_CONNECTION=mysql|g" .env || echo "DB_CONNECTION=mysql" >> .env
+
+            # 5. إنشاء جدول sessions + migrate
+            php artisan session:table --force 2>/dev/null || true
             php artisan migrate --force
 
-            # كاش للـ performance
+            # 6. Cache للـ performance
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
 
-            echo "Laravel deployed & migrated successfully!"
+            # 7. Restart Laravel service
+            sudo systemctl restart laravel.service 2>/dev/null || true
+            # لو السيرفيس مش موجود، نشغل built-in server على port 8000
+            pkill -f "php artisan serve" || true
+            nohup php artisan serve --host=0.0.0.0 --port=8000 > /dev/null 2>&1 &
+
+            echo "Laravel deployed & running on http://$(curl -s ifconfig.me):8000"
+            echo "Deployment completed successfully!"
