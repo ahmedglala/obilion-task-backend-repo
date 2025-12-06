@@ -12,7 +12,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Laravel 
+      - name: Deploy Laravel (النسخة النهائية خلاص)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.BACKEND_HOST }}
@@ -22,19 +22,16 @@ jobs:
             set -e
             APP_DIR=/home/ubuntu/laravel-app
 
-            # Clone أو Pull
             rm -rf $APP_DIR
             mkdir -p $APP_DIR
             git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR || (cd $APP_DIR && git pull)
             cd $APP_DIR
 
-            # PHP 8.3
             sudo apt update -y
             sudo apt install -y ca-certificates software-properties-common
             sudo add-apt-repository ppa:ondrej/php -y
             sudo apt update -y
             sudo apt install -y php8.3 php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip git unzip curl
-
 
             command -v composer || sudo curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
 
@@ -43,6 +40,8 @@ jobs:
             [ -f .env ] || cp .env.example .env
             php artisan key:generate --force
 
+            # السطور اللي هتخلّص كل المشاكل
+            sed -i "s|DB_CONNECTION=.*|DB_CONNECTION=mysql|g" .env
             sed -i "s|DB_HOST=.*|DB_HOST=${{ secrets.RDS_ENDPOINT }}|g" .env
             sed -i "s|DB_DATABASE=.*|DB_DATABASE=appdb|g" .env
             sed -i "s|DB_USERNAME=.*|DB_USERNAME=admin|g" .env
@@ -53,4 +52,4 @@ jobs:
             pkill -f "php artisan serve" || true
             nohup php artisan serve --host=0.0.0.0 --port=8000 > /tmp/laravel.log 2>&1 &
 
-            echo "Laravel شغال دلوقتي على http://$(curl -s ifconfig.me):8000"
+            echo "Laravel شغال 100000% على http://$(curl -s ifconfig.me):8000"
