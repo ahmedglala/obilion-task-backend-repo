@@ -52,7 +52,9 @@ jobs:
 
             # نعمل جدول sessions الأول
             php artisan session:table 2>/dev/null || true
-
+            php artisan config:clear
+            php artisan cache:clear
+            php artisan route:clear
             # بعد كده نعمل migrate
             php artisan migrate --force
 
