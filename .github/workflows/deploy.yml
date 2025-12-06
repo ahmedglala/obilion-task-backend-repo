@@ -12,7 +12,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Laravel (النسخة النهائية خلاص)
+      - name: Deploy Laravel (النسخة النهائية اللي هتشتغل من أول مرة)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.BACKEND_HOST }}
@@ -21,35 +21,47 @@ jobs:
           script: |
             set -e
             APP_DIR=/home/ubuntu/laravel-app
-
-            rm -rf $APP_DIR
-            mkdir -p $APP_DIR
+            rm -rf $APP_DIR && mkdir -p $APP_DIR
             git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR || (cd $APP_DIR && git pull)
             cd $APP_DIR
 
+            # PHP + extensions + netcat
             sudo apt update -y
-            sudo apt install -y ca-certificates software-properties-common
+            sudo apt install -y ca-certificates software-properties-common netcat-openbsd
             sudo add-apt-repository ppa:ondrej/php -y
             sudo apt update -y
             sudo apt install -y php8.3 php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip git unzip curl
 
-            command -v composer || sudo curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
+            # Composer
+            sudo curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
 
             composer install --no-dev --optimize-autoloader --no-interaction
 
             [ -f .env ] || cp .env.example .env
             php artisan key:generate --force
 
-            # السطور اللي هتخلّص كل المشاكل
+            # مهم جدًا: نعدل الـ DB settings الأول قبل أي artisan تاني
             sed -i "s|DB_CONNECTION=.*|DB_CONNECTION=mysql|g" .env
             sed -i "s|DB_HOST=.*|DB_HOST=${{ secrets.RDS_ENDPOINT }}|g" .env
             sed -i "s|DB_DATABASE=.*|DB_DATABASE=appdb|g" .env
             sed -i "s|DB_USERNAME=.*|DB_USERNAME=admin|g" .env
             sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|g" .env
+            sed -i "s|SESSION_DRIVER=.*|SESSION_DRIVER=database|g" .env || echo "SESSION_DRIVER=database" >> .env
 
+          
+
+            # نعمل جدول sessions الأول
+            php artisan session:table 2>/dev/null || true
+
+            # بعد كده نعمل migrate
             php artisan migrate --force
 
+            # Cache
+            php artisan config:cache
+            php artisan route:cache
+
+            # تشغيل Laravel
             pkill -f "php artisan serve" || true
             nohup php artisan serve --host=0.0.0.0 --port=8000 > /tmp/laravel.log 2>&1 &
 
-            echo "Laravel شغال 100000% على http://$(curl -s ifconfig.me):8000"
+            echo "Laravel شغال 100000000% على http://$(curl -s ifconfig.me):8000"
