@@ -2,7 +2,7 @@
 name: Deploy Laravel Backend
 on:
   push:
-    branches: [ main, 12.x ]
+    branches: [main, 12.x]
   workflow_dispatch:
 
 jobs:
@@ -12,43 +12,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Laravel via SSH (النسخة النهائية 100%)
+      - name: Deploy Laravel 
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.BACKEND_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
           script: |
             set -e
-
             APP_DIR=/home/ubuntu/laravel-app
-            echo "Deploying to $APP_DIR"
 
             # Clone أو Pull
-            if [ ! -d "$APP_DIR/.git" ]; then
-              echo "First time → cloning"
-              rm -rf $APP_DIR
-              mkdir -p $APP_DIR
-              git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR
-            else
-              echo "Repo exists → pulling"
-              cd $APP_DIR
-              git checkout main || git checkout 12.x || true
-              git pull
-            fi
+            rm -rf $APP_DIR
+            mkdir -p $APP_DIR
+            git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR || (cd $APP_DIR && git pull)
             cd $APP_DIR
 
-            # تثبيت PHP 8.3 من repo رسمي
+            # PHP 8.3
             sudo apt update -y
-            sudo apt install -y ca-certificates apt-transport-https software-properties-common
+            sudo apt install -y ca-certificates software-properties-common
             sudo add-apt-repository ppa:ondrej/php -y
             sudo apt update -y
-            sudo apt install -y php8.3 php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip unzip curl git
+            sudo apt install -y php8.3 php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip git unzip curl
 
-            # تثبيت Composer في الـ home (مش محتاج sudo)
-            command -v composer >/dev/null || curl -sS https://getcomposer.org/installer | php -- --install-dir=/home/ubuntu/.local/bin --filename=composer
-            export PATH="$PATH:/home/ubuntu/.local/bin"
+
+            command -v composer || sudo curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
 
             composer install --no-dev --optimize-autoloader --no-interaction
 
@@ -61,11 +49,8 @@ jobs:
             sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|g" .env
 
             php artisan migrate --force
-            php artisan config:cache
-            php artisan route:cache
 
             pkill -f "php artisan serve" || true
             nohup php artisan serve --host=0.0.0.0 --port=8000 > /tmp/laravel.log 2>&1 &
 
-            echo "Laravel deployed successfully!"
-            echo "Open: http://$(curl -s ifconfig.me):8000"
+            echo "Laravel شغال دلوقتي على http://$(curl -s ifconfig.me):8000"
