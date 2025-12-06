@@ -12,7 +12,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Laravel via SSH (مع sudo للـ clone)
+      - name: Deploy Laravel via SSH (النسخة النهائية)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.BACKEND_HOST }}
@@ -22,35 +22,35 @@ jobs:
           script: |
             set -e
 
-            # المسار الصحيح في الـ home
             APP_DIR=/home/ubuntu/laravel-app
-
             echo "Deploying to $APP_DIR"
 
-            # لو أول مرة → نعمل clone بـ sudo
+            # 1. Clone أو Pull
             if [ ! -d "$APP_DIR/.git" ]; then
-              echo "First time → cloning with sudo"
-              sudo rm -rf $APP_DIR
-              sudo mkdir -p $(dirname $APP_DIR)
-              sudo chown ubuntu:ubuntu $(dirname $APP_DIR)
+              echo "First time → cloning"
+              rm -rf $APP_DIR
+              mkdir -p $APP_DIR
               git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR
             else
-              echo "Repo exists → pulling latest"
+              echo "Repo exists → pulling"
               cd $APP_DIR
-              git fetch origin
               git checkout main || git checkout 12.x || true
               git pull
             fi
-
             cd $APP_DIR
 
-            # تثبيت PHP لو محتاج (بـ sudo)
+            # 2. تثبيت PHP 8.3 من repo رسمي (الطريقة اللي كل الناس بتستخدمها)
+            sudo apt update -y
+            sudo apt install -y ca-certificates apt-transport-https software-properties-common
+            sudo add-apt-repository ppa:ondrej/php -y
             sudo apt update -y
             sudo apt install -y php8.3 php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip unzip curl git
 
-            # composer + laravel
+            # 3. Composer
+            command -v composer >/dev/null || curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
             composer install --no-dev --optimize-autoloader --no-interaction
 
+            # 4. .env + DB config
             [ -f .env ] || cp .env.example .env
             php artisan key:generate --force
 
@@ -59,11 +59,12 @@ jobs:
             sed -i "s|DB_USERNAME=.*|DB_USERNAME=admin|g" .env
             sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|g" .env
 
+            # 5. Migrate + Cache
             php artisan migrate --force
             php artisan config:cache
             php artisan route:cache
 
-            # تشغيل Laravel
+            # 6. تشغيل Laravel على 8000
             pkill -f "php artisan serve" || true
             nohup php artisan serve --host=0.0.0.0 --port=8000 > /tmp/laravel.log 2>&1 &
 
