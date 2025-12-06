@@ -22,7 +22,7 @@ jobs:
           script: |
             set -e
 
-            APP_DIR=~/laravel-app
+            APP_DIR=/laravel-app
             cd $APP_DIR || mkdir -p $APP_DIR && cd $APP_DIR
 
             # 1. Clone or pull (يدعم main أو 12.x)
@@ -30,7 +30,8 @@ jobs:
               echo "First time → cloning repo"
               rm -rf $APP_DIR
               git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR
-              cd obilion-task-backend-repo/
+              cd $APP_DIR
+              echo "in the directory"
             else
               echo "Repo exists → pulling latest"
               git fetch origin
