@@ -1,0 +1,59 @@
+# .github/workflows/deploy.yml
+name: Deploy Laravel Backend
+
+on:
+  push:
+    branches: [ 12.x ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy Laravel via SSH (كل حاجة من الصفر)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.BACKEND_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            APP_DIR=~/laravel-app
+
+            # لو المجلد موجود → نعمل pull، لو مش موجود → نعمل clone من الأول
+            if [ -d "$APP_DIR/.git" ]; then
+              echo "Repository already exists → doing git pull"
+              cd $APP_DIR
+              git checkout main
+              git pull origin main
+            else
+              echo "First time → cloning repository"
+              rm -rf $APP_DIR
+              git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR
+              cd $APP_DIR
+            fi
+
+            # تثبيت الـ dependencies
+            composer install --no-dev --optimize-autoloader --no-interaction
+
+            # إنشاء .env لو مش موجود
+            if [ ! -f .env ]; then
+              cp .env.example .env
+              php artisan key:generate --force
+            fi
+
+            sed -i "s/DB_HOST=.*/DB_HOST=${{ secrets.RDS_ENDPOINT }}/g" .env
+            sed -i "s/DB_DATABASE=.*/DB_DATABASE=appdb/g" .env
+            sed -i "s/DB_USERNAME=.*/DB_USERNAME=admin/g" .env
+            sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=${{ secrets.DB_PASSWORD }}/g" .env
+
+            # ميجريشن
+            php artisan migrate --force
+
+            # كاش للـ performance
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
+
+            echo "Laravel deployed & migrated successfully!"
