@@ -2,8 +2,8 @@
 name: Deploy Laravel Backend
 on:
   push:
-    branches: [ 12.x, main ]   # خليناها تشتغل على main و 12.x
-  workflow_dispatch:         # تقدر تشغلها يدوي من GitHub لو عايز
+    branches: [ main, 12.x ]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -12,7 +12,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Laravel via SSH (Fully Automated)
+      - name: Deploy Laravel via SSH (مع sudo للـ clone)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.BACKEND_HOST }}
@@ -22,53 +22,50 @@ jobs:
           script: |
             set -e
 
-            APP_DIR=/laravel-app
-            cd $APP_DIR || mkdir -p $APP_DIR && cd $APP_DIR
+            # المسار الصحيح في الـ home
+            APP_DIR=/home/ubuntu/laravel-app
 
-            # 1. Clone or pull (يدعم main أو 12.x)
-            if [ ! -d ".git" ]; then
-              echo "First time → cloning repo"
-              rm -rf $APP_DIR
+            echo "Deploying to $APP_DIR"
+
+            # لو أول مرة → نعمل clone بـ sudo
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "First time → cloning with sudo"
+              sudo rm -rf $APP_DIR
+              sudo mkdir -p $(dirname $APP_DIR)
+              sudo chown ubuntu:ubuntu $(dirname $APP_DIR)
               git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR
-              cd $APP_DIR
-              echo "in the directory"
             else
               echo "Repo exists → pulling latest"
+              cd $APP_DIR
               git fetch origin
-              git checkout 12.x || git checkout main || true
-              git pull origin 12.x || git pull origin main || true
+              git checkout main || git checkout 12.x || true
+              git pull
             fi
 
-            # 2. Install PHP extensions first (قبل أي composer)
-            sudo apt update -y
-            sudo apt install -y php8.3-sqlite3 php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip
+            cd $APP_DIR
 
-            # 3. Composer install
+            # تثبيت PHP لو محتاج (بـ sudo)
+            sudo apt update -y
+            sudo apt install -y php8.3 php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip unzip curl git
+
+            # composer + laravel
             composer install --no-dev --optimize-autoloader --no-interaction
 
-            # 4. .env setup – نعدل الـ DB قبل أي artisan command
             [ -f .env ] || cp .env.example .env
-            php artisan key:generate --force 2>/dev/null || true
+            php artisan key:generate --force
 
             sed -i "s|DB_HOST=.*|DB_HOST=${{ secrets.RDS_ENDPOINT }}|g" .env
             sed -i "s|DB_DATABASE=.*|DB_DATABASE=appdb|g" .env
             sed -i "s|DB_USERNAME=.*|DB_USERNAME=admin|g" .env
             sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|g" .env
-            sed -i "s|SESSION_DRIVER=.*|SESSION_DRIVER=database|g" .env || echo "SESSION_DRIVER=database" >> .env
-            sed -i "s|DB_CONNECTION=.*|DB_CONNECTION=mysql|g" .env || echo "DB_CONNECTION=mysql" >> .env
 
-            # 5. Session table + migrate (safe)
-            php artisan session:table 2>/dev/null || true
             php artisan migrate --force
-
-            # 6. Cache
             php artisan config:cache
             php artisan route:cache
-            php artisan view:cache
 
-            # 7. Restart Laravel
-            sudo systemctl restart laravel.service 2>/dev/null || true
+            # تشغيل Laravel
             pkill -f "php artisan serve" || true
             nohup php artisan serve --host=0.0.0.0 --port=8000 > /tmp/laravel.log 2>&1 &
 
-            echo "Laravel deployed successfully on port 8000"
+            echo "Laravel deployed successfully!"
+            echo "Open: http://$(curl -s ifconfig.me):8000"
