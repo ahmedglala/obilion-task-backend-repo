@@ -1,3 +1,4 @@
+# .github/workflows/deploy.yml
 name: Deploy Laravel Backend
 
 on:
@@ -8,12 +9,11 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Laravel Backend
+      - name: Deploy Laravel (نسخة نهائية)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.BACKEND_HOST }}
@@ -21,84 +21,53 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
-
-            echo "===== بدء عملية النشر ====="
-
             APP_DIR=/home/ubuntu/laravel-app
+            RDS_HOST=${{ secrets.RDS_ENDPOINT }}
+            DB_NAME=appdb
+            DB_USER=admin
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            APP_PORT=8000
 
-            # حذف النسخة القديمة وإعادة التحميل
-            rm -rf $APP_DIR
-            mkdir -p $APP_DIR
-            git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR
+            # ===== تنظيف ونسخ الكود =====
+            rm -rf $APP_DIR && mkdir -p $APP_DIR
+            git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR || (cd $APP_DIR && git pull)
             cd $APP_DIR
 
-            echo "===== تثبيت المتطلبات ====="
-
+            # ===== تثبيت PHP والاعتماديات =====
             sudo apt update -y
-            sudo apt install -y ca-certificates software-properties-common netcat-openbsd
+            sudo apt install -y ca-certificates software-properties-common netcat-openbsd unzip curl git
             sudo add-apt-repository ppa:ondrej/php -y
             sudo apt update -y
+            sudo apt install -y php8.3 php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip composer
 
-            sudo apt install -y \
-              php8.3 \
-              php8.3-cli \
-              php8.3-mysql \
-              php8.3-mbstring \
-              php8.3-xml \
-              php8.3-bcmath \
-              php8.3-zip \
-              git \
-              unzip \
-              curl \
-              mysql-client
-
-            echo "===== تثبيت Composer ====="
-            sudo curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
-
-            echo "===== تثبيت مكتبات Laravel ====="
+            # ===== Composer Dependencies =====
             composer install --no-dev --optimize-autoloader --no-interaction
 
-            echo "===== إعداد ملف البيئة ====="
+            # ===== إعداد ملف البيئة =====
             [ -f .env ] || cp .env.example .env
-
-            # تنظيف الكاش يدوياً (حل جذري للمشكلة)
-            rm -f bootstrap/cache/*.php
-
             php artisan key:generate --force
 
-            # إعدادات قاعدة البيانات
             sed -i "s|DB_CONNECTION=.*|DB_CONNECTION=mysql|g" .env
-            sed -i "s|DB_HOST=.*|DB_HOST=${{ secrets.RDS_ENDPOINT }}|g" .env
-            sed -i "s|DB_PORT=.*|DB_PORT=3306|g" .env
-            sed -i "s|DB_DATABASE=.*|DB_DATABASE=appdb|g" .env
-            sed -i "s|DB_USERNAME=.*|DB_USERNAME=admin|g" .env
-            sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|g" .env
+            sed -i "s|DB_HOST=.*|DB_HOST=$RDS_HOST|g" .env
+            sed -i "s|DB_DATABASE=.*|DB_DATABASE=$DB_NAME|g" .env
+            sed -i "s|DB_USERNAME=.*|DB_USERNAME=$DB_USER|g" .env
+            sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|g" .env
+            sed -i "s|SESSION_DRIVER=.*|SESSION_DRIVER=database|g" .env || echo "SESSION_DRIVER=database" >> .env
 
-            # Laravel 11/12 يستخدم CACHE_STORE بدل CACHE_DRIVER
-            sed -i "s|SESSION_DRIVER=.*|SESSION_DRIVER=file|g" .env || echo "SESSION_DRIVER=file" >> .env
-            sed -i "s|CACHE_STORE=.*|CACHE_STORE=file|g" .env || echo "CACHE_STORE=file" >> .env
+            # ===== إنشاء جدول sessions لو مش موجود =====
+            php artisan session:table 2>/dev/null || true
 
-            echo "===== اختبار الاتصال بـ RDS ====="
-            nc -zv ${{ secrets.RDS_ENDPOINT }} 3306
-
-            echo "===== اختبار الدخول على MySQL ====="
-            mysql -h ${{ secrets.RDS_ENDPOINT }} -u admin -p${{ secrets.DB_PASSWORD }} -e "SHOW DATABASES;"
-
-            echo "===== تنظيف كاش Laravel ====="
-            php artisan config:clear
-            php artisan cache:clear
-            php artisan route:clear
-
-            echo "===== تنفيذ Database Migrations ====="
+            # ===== تنفيذ Migrations =====
             php artisan migrate --force
 
-            echo "===== إعادة بناء الكاش ====="
+            # ===== تنظيف الكاش =====
             php artisan config:cache
             php artisan route:cache
+            php artisan cache:clear
 
-            echo "===== تشغيل Laravel Server ====="
+            # ===== تشغيل Laravel على كل الواجهات =====
             pkill -f "php artisan serve" || true
-            nohup php artisan serve --host=0.0.0.0 --port=8000 > /tmp/laravel.log 2>&1 &
+            nohup php artisan serve --host=0.0.0.0 --port=$APP_PORT > /tmp/laravel.log 2>&1 &
 
-            echo "===== تم تشغيل Laravel بنجاح ====="
-            echo "Application URL: http://$(curl -s ifconfig.me):8000"
+            echo "Laravel شغال على http://$(curl -s ifconfig.me):$APP_PORT"
+            echo "Logs: /tmp/laravel.log"
