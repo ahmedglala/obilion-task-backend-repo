@@ -1,5 +1,5 @@
-# .github/workflows/deploy.yml
 name: Deploy Laravel Backend
+
 on:
   push:
     branches: [main, 12.x]
@@ -8,11 +8,12 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Laravel (النسخة النهائية اللي هتشتغل من أول مرة)
+      - name: Deploy Laravel Backend
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.BACKEND_HOST }}
@@ -20,50 +21,81 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
+
+            echo "===== بدء عملية النشر ====="
+
             APP_DIR=/home/ubuntu/laravel-app
-            rm -rf $APP_DIR && mkdir -p $APP_DIR
-            git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR || (cd $APP_DIR && git pull)
+
+            # حذف النسخة القديمة وإعادة التحميل
+            rm -rf $APP_DIR
+            mkdir -p $APP_DIR
+            git clone https://github.com/ahmedglala/obilion-task-backend-repo.git $APP_DIR
             cd $APP_DIR
 
-            # PHP + extensions + netcat
+            echo "===== تثبيت المتطلبات ====="
+
             sudo apt update -y
             sudo apt install -y ca-certificates software-properties-common netcat-openbsd
             sudo add-apt-repository ppa:ondrej/php -y
             sudo apt update -y
-            sudo apt install -y php8.3 php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-zip git unzip curl
 
-            # Composer
+            sudo apt install -y \
+              php8.3 \
+              php8.3-cli \
+              php8.3-mysql \
+              php8.3-mbstring \
+              php8.3-xml \
+              php8.3-bcmath \
+              php8.3-zip \
+              git \
+              unzip \
+              curl \
+              mysql-client
+
+            echo "===== تثبيت Composer ====="
             sudo curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
 
+            echo "===== تثبيت مكتبات Laravel ====="
             composer install --no-dev --optimize-autoloader --no-interaction
 
+            echo "===== إعداد ملف البيئة ====="
             [ -f .env ] || cp .env.example .env
+
             php artisan key:generate --force
 
-            # مهم جدًا: نعدل الـ DB settings الأول قبل أي artisan تاني
+            # إعدادات قاعدة البيانات
             sed -i "s|DB_CONNECTION=.*|DB_CONNECTION=mysql|g" .env
             sed -i "s|DB_HOST=.*|DB_HOST=${{ secrets.RDS_ENDPOINT }}|g" .env
+            sed -i "s|DB_PORT=.*|DB_PORT=3306|g" .env
             sed -i "s|DB_DATABASE=.*|DB_DATABASE=appdb|g" .env
             sed -i "s|DB_USERNAME=.*|DB_USERNAME=admin|g" .env
             sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|g" .env
-            sed -i "s|SESSION_DRIVER=.*|SESSION_DRIVER=database|g" .env || echo "SESSION_DRIVER=database" >> .env
 
-          
+            # نخلي الكاش والسيشن File أثناء الديبلاي
+            sed -i "s|SESSION_DRIVER=.*|SESSION_DRIVER=file|g" .env || echo "SESSION_DRIVER=file" >> .env
+            sed -i "s|CACHE_DRIVER=.*|CACHE_DRIVER=file|g" .env || echo "CACHE_DRIVER=file" >> .env
 
-            # نعمل جدول sessions الأول
-            php artisan session:table 2>/dev/null || true
+            echo "===== اختبار الاتصال بـ RDS ====="
+            nc -zv ${{ secrets.RDS_ENDPOINT }} 3306
+
+            echo "===== اختبار الدخول على MySQL ====="
+            mysql -h ${{ secrets.RDS_ENDPOINT }} -u admin -p${{ secrets.DB_PASSWORD }} -e "SHOW DATABASES;"
+
+            echo "===== تنظيف كاش Laravel ====="
             php artisan config:clear
             php artisan cache:clear
             php artisan route:clear
-            # بعد كده نعمل migrate
+
+            echo "===== تنفيذ Database Migrations ====="
             php artisan migrate --force
 
-            # Cache
+            echo "===== إعادة بناء الكاش ====="
             php artisan config:cache
             php artisan route:cache
 
-            # تشغيل Laravel
+            echo "===== تشغيل Laravel Server ====="
             pkill -f "php artisan serve" || true
             nohup php artisan serve --host=0.0.0.0 --port=8000 > /tmp/laravel.log 2>&1 &
 
-            echo "Laravel شغال 100000000% على http://$(curl -s ifconfig.me):8000"
+            echo "===== تم تشغيل Laravel بنجاح ====="
+            echo "Application URL: http://$(curl -s ifconfig.me):8000"
