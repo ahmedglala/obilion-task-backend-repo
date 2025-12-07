@@ -61,6 +61,9 @@ jobs:
             echo "===== إعداد ملف البيئة ====="
             [ -f .env ] || cp .env.example .env
 
+            # تنظيف الكاش يدوياً (حل جذري للمشكلة)
+            rm -f bootstrap/cache/*.php
+
             php artisan key:generate --force
 
             # إعدادات قاعدة البيانات
@@ -71,9 +74,9 @@ jobs:
             sed -i "s|DB_USERNAME=.*|DB_USERNAME=admin|g" .env
             sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|g" .env
 
-            # نخلي الكاش والسيشن File أثناء الديبلاي
+            # Laravel 11/12 يستخدم CACHE_STORE بدل CACHE_DRIVER
             sed -i "s|SESSION_DRIVER=.*|SESSION_DRIVER=file|g" .env || echo "SESSION_DRIVER=file" >> .env
-            sed -i "s|CACHE_DRIVER=.*|CACHE_DRIVER=file|g" .env || echo "CACHE_DRIVER=file" >> .env
+            sed -i "s|CACHE_STORE=.*|CACHE_STORE=file|g" .env || echo "CACHE_STORE=file" >> .env
 
             echo "===== اختبار الاتصال بـ RDS ====="
             nc -zv ${{ secrets.RDS_ENDPOINT }} 3306
